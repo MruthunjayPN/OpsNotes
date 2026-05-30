@@ -1,0 +1,54 @@
+---
+title: "DEL-001 Score Divergence — Overview"
+domain: debugging-log
+topic: del-001-score-divergence
+section: overview
+sectionIndex: 1
+status: stable
+priority: high
+tags: [mlflow, pyfunc, schema-enforcement, lightgbm, nan-handling, parallel-run, del-001]
+lastUpdated: "2026-05-30"
+related: [spark-scorer, mlflow-patterns, model-registry]
+---
+
+# DEL-001 Score Divergence
+
+Parallel-run validation between the MLOps inference pipeline and the SME (Data Science) reference for **DEL_001 — Dell Propensity-to-Open** initially showed **19,578 customers** with mismatched scores out of 4.59M. After a sequence of fixes the divergence collapsed to **zero on scores** and **0.2% on ranks** (the rank drift being a benign tie-break artifact).
+
+<Invariant>
+Schema enforcement in MLflow pyfunc is a **strict gate between data and model**. The schema you bake in at registration time becomes a hard contract at inference. If the registered schema does not match the natural shape of real scoring data — including NaN-bearing columns — the pyfunc layer will either reject the call or coerce values in ways that silently change model output.
+</Invariant>
+
+## What this page documents
+
+The full debugging trail from first divergence signal to zero-score-mismatch state. The interesting part is not any one fix — it is how the bug **moved** across layers as each suspect was eliminated, and how the same symptom (6,124 diverging customers) appeared from two different mechanisms in two different fixes.
+
+<Cards>
+  <Card title="Symptom" tone="warning">
+    19,578 customers (later 6,124) with non-zero score divergence vs SME reference. All P &lt; SME. Concentrated in return-heavy, purchase-empty customer class.
+  </Card>
+  <Card title="Root cause" tone="danger">
+    Model registered with `long` schema for 3 count features. Pyfunc enforcement coerced float64 NaN → int64 at scoring time, silently injecting filled values into LightGBM's NaN-default-direction logic.
+  </Card>
+  <Card title="Fix" tone="success">
+    Re-register model with all 32 features as `double`. Strip dtype-branching from feature casting in scoring pipeline. NaN now survives end-to-end exactly as SME passes it.
+  </Card>
+</Cards>
+
+## Final state
+
+<KeyValue
+  rows={[
+    ["Total customers scored", "4,594,426"],
+    ["Score divergence (start)", "19,578"],
+    ["Score divergence (after schema fix)", "6,124"],
+    ["Score divergence (final)", "0"],
+    ["Rank divergence (final)", "10,084 (0.2%)"],
+    ["Rank diff magnitude", "±1 decile, only on tied scores"],
+    ["Acceptable parallel-run tolerance", "Met"]
+  ]}
+/>
+
+## Why this matters beyond DEL-001
+
+Every model in the registry that has count-style features (integer-typed at training time, NaN-bearing at scoring time) is exposed to the same bug. The fix is **schema-level, not code-level** — meaning every future model registration must treat nullable numeric columns as `double`, not `long`, regardless of how the training data looks.

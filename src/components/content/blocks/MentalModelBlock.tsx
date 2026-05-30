@@ -4,13 +4,16 @@ export interface QAItem {
 }
 
 export interface MentalModelBlockProps {
-  items: QAItem[];
+  items?: QAItem[];
+  pairs?: QAItem[];
 }
 
-export function MentalModelBlock({ items }: MentalModelBlockProps) {
+export function MentalModelBlock({ items, pairs }: MentalModelBlockProps) {
+  const entries = pairs ?? items ?? [];
+
   return (
     <div className="my-5 space-y-2">
-      {items.map((item, i) => (
+      {entries.map((item, i) => (
         <div key={i} className="rounded border border-border overflow-hidden">
           <div className="flex items-start gap-2.5 bg-blueBg px-4 py-2.5">
             <span className="text-[10px] font-mono font-semibold text-blue mt-0.5 flex-shrink-0">

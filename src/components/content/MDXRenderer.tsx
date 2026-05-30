@@ -7,11 +7,11 @@ import type { PluggableList } from "unified";
 import { CodeBlock } from "./CodeBlock";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { InvariantBlock } from "./blocks/InvariantBlock";
-import { CardsBlock } from "./blocks/CardsBlock";
+import { CardsBlock, Card } from "./blocks/CardsBlock";
 import { KeyValueBlock } from "./blocks/KeyValueBlock";
 import { FlowBlock } from "./blocks/FlowBlock";
 import { TableBlock } from "./blocks/TableBlock";
-import { StepsBlock } from "./blocks/StepsBlock";
+import { StepsBlock, Step } from "./blocks/StepsBlock";
 import { MentalModelBlock } from "./blocks/MentalModelBlock";
 import { IssueCard } from "./blocks/IssueCard";
 import { KTNoteBlock } from "./blocks/KTNoteBlock";
@@ -24,10 +24,12 @@ const components = {
   // Block components (used as JSX in MDX files)
   Invariant: InvariantBlock,
   Cards: CardsBlock,
+  Card: Card,
   KeyValue: KeyValueBlock,
   Flow: FlowBlock,
   DataTable: TableBlock,
   Steps: StepsBlock,
+  Step: Step,
   MentalModel: MentalModelBlock,
   IssueCard: IssueCard,
   KTNote: KTNoteBlock,

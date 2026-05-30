@@ -503,6 +503,7 @@ public/pagefind/
 | Sidebar + layout shell  | DONE   | session-2: Sidebar, TopBar, TOC, SectionTabs, routing   |
 | MDX renderer + blocks   | DONE   | session-3: MDXRenderer, 11 block components, sample MDX |
 | Dark theme              | DONE   | session-dark-theme: CSS vars, Zustand toggle, no-FOUC   |
+| DEL-001 debugging-log   | DONE   | content/del-001-score-divergence-all-sections: 6 sections added, 6 component prop aliases fixed |
 | Spark Scorer content    | NEXT   | session-4: port all 8 sections to MDX                   |
 | Monitoring content      | TODO   |                                                         |
 | Feature Store content   | TODO   |                                                         |
