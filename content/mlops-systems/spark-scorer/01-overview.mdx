@@ -1,0 +1,126 @@
+---
+title: "Spark Scorer — Overview"
+domain: mlops-systems
+topic: spark-scorer
+section: overview
+sectionIndex: 1
+status: stable
+priority: high
+tags: [spark, mlflow, pyspark, inference, catboost]
+lastUpdated: "2025-05-27"
+related: [feature-store, monitoring]
+ktSession: "Session 1 — Apr 2025"
+---
+
+## What is it?
+
+The Spark Scorer is the distributed inference engine that runs CatBoost models at scale using PySpark. It loads a trained model from the MLflow registry, broadcasts it to all executors, and scores each Spark partition using `mapInPandas`.
+
+<Invariant title="Core pattern">
+One model load per job run. The model is broadcast once via `sc.broadcast()` to all Spark workers, avoiding repeated deserialization. `mapInPandas` then calls the model's `predict()` method on each partition as a native Pandas DataFrame.
+</Invariant>
+
+## System facts
+
+<KeyValue items={[
+  { key: "Framework", value: "PySpark 3.4 + MLflow 2.x (pyfunc flavor)" },
+  { key: "Model type", value: "CatBoost — sklearn-compatible wrapper" },
+  { key: "Input", value: "Feature Delta table (Unity Catalog)" },
+  { key: "Output", value: "Scored Delta table with appended score column" },
+  { key: "Trigger", value: "Azure DevOps pipeline, scheduled nightly" },
+  { key: "Cluster", value: "Databricks job cluster, 8-node autoscale" }
+]} />
+
+## How the pieces fit
+
+<Cards cols={3} items={[
+  { title: "Model broadcast", body: "One load, broadcasted to all executors. Avoids re-loading on every partition — critical for large CatBoost models (>200MB).", tag: "performance" },
+  { title: "mapInPandas", body: "Partition-wise scoring using native Pandas DataFrames. Preserves model API contract; CatBoost predict() expects a DataFrame.", tag: "pattern" },
+  { title: "Delta write", body: "Results appended to Delta Lake with ACID semantics. Downstream jobs read the scored table via Unity Catalog.", tag: "storage" }
+]} />
+
+## High-level flow
+
+<Flow steps={[
+  { label: "Load Config", desc: "YAML from blob storage" },
+  { label: "Load Model", desc: "MLflow pyfunc.load_model()" },
+  { label: "Broadcast", desc: "sc.broadcast(model)" },
+  { label: "Score", desc: "mapInPandas per partition" },
+  { label: "Write Delta", desc: "Unity Catalog output table" }
+]} />
+
+## Core code
+
+<CodeSnippet
+  title="Broadcast + mapInPandas scorer"
+  language="python"
+  file="pipeline/scorer.py"
+  code={`model = mlflow.pyfunc.load_model(config.model_uri)
+broadcast_model = spark.sparkContext.broadcast(model)
+
+def score_partition(iterator):
+    m = broadcast_model.value
+    for pdf in iterator:
+        pdf["score"] = m.predict(pdf[feature_cols])
+        yield pdf
+
+scored_df = df.mapInPandas(score_partition, schema=output_schema)
+scored_df.write.format("delta").mode("append").saveAsTable(config.output_table)`}
+/>
+
+## Why not UDFs or pandas_udf?
+
+<MentalModel items={[
+  {
+    q: "Why mapInPandas instead of a standard Spark UDF?",
+    a: "UDFs operate row-by-row. CatBoost predict() is vectorized — it needs a full DataFrame to batch-score efficiently. mapInPandas feeds each partition as a Pandas DataFrame, preserving the batch."
+  },
+  {
+    q: "Why broadcast the model instead of loading inside the closure?",
+    a: "Loading inside the closure means every task deserializes the model from scratch. Broadcasting loads it once per executor JVM, then all tasks on that executor share the same in-memory model object."
+  },
+  {
+    q: "What happens if a partition has zero rows?",
+    a: "mapInPandas yields nothing for empty DataFrames. The iterator protocol handles this gracefully — score_partition simply never yields if the input is empty. No special handling needed."
+  }
+]} />
+
+## Known issues
+
+<IssueCard
+  type="perf"
+  title="First partition cold start adds ~30s"
+  symptom="First batch in each Spark job takes 25-35s while subsequent batches complete in 2-3s."
+  cause="Spark executor cold start — JVM init + model deserialization from broadcast buffer happens on first task touch per executor."
+  fix="Pre-warm executors by running a tiny dummy job before the scoring job, or accept the overhead (it's a one-time cost per executor per cluster lifecycle)."
+/>
+
+<IssueCard
+  type="bug"
+  title="Schema mismatch on nullable feature columns"
+  symptom="TypeError: Cannot cast None to float in CatBoost predict() — seen intermittently on weekend batch runs."
+  cause="Feature table allows nulls in some columns, but the CatBoost model was trained on imputed data. Nulls pass schema validation but crash inside predict()."
+  fix="Add a null-fill step before mapInPandas: `df = df.fillna(config.feature_defaults)`. Defaults come from training dataset statistics stored in MLflow params."
+/>
+
+## Session notes
+
+<KTNote
+  session="Session 1 — Spark Scorer KT"
+  date="Apr 2025"
+  coverage={75}
+  understood={[
+    "Broadcast pattern and why it matters for large models",
+    "mapInPandas vs pandas_udf — when to use which",
+    "MLflow pyfunc flavor and how it abstracts the model API",
+    "Delta write mechanics and Unity Catalog table naming"
+  ]}
+  unclear={[
+    "How broadcast cleanup works — when does the broadcast variable get GC'd?",
+    "Partition size tuning — what's the ideal partition count for the current cluster?"
+  ]}
+/>
+
+<Callout type="tip" title="Quick check">
+  Run `spark.sparkContext.getConf().get("spark.sql.shuffle.partitions")` to see the current partition count before scoring. Default 200 is usually too high for this dataset — we use 32.
+</Callout>

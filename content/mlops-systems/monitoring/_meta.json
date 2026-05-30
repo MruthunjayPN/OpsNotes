@@ -1,0 +1,11 @@
+{
+  "id": "monitoring",
+  "title": "Monitoring",
+  "icon": "◎",
+  "domain": "mlops-systems",
+  "status": "wip",
+  "order": 2,
+  "subtitle": "Model performance monitoring, drift detection, and alerting",
+  "tags": ["monitoring", "drift", "mlflow", "databricks"],
+  "sections": ["overview", "concepts", "setup", "debugging"]
+}

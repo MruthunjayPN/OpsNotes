@@ -1,0 +1,11 @@
+{
+  "id": "unity-catalog",
+  "title": "Unity Catalog",
+  "icon": "⊟",
+  "domain": "devops-platform",
+  "status": "draft",
+  "order": 3,
+  "subtitle": "Databricks Unity Catalog — governance, lineage, and access control",
+  "tags": ["unity-catalog", "databricks", "governance"],
+  "sections": ["overview", "concepts"]
+}

@@ -1,0 +1,11 @@
+{
+  "id": "mlflow-patterns",
+  "title": "MLflow Patterns",
+  "icon": "⬦",
+  "domain": "devops-platform",
+  "status": "draft",
+  "order": 2,
+  "subtitle": "MLflow experiment tracking, model registry, and serving patterns",
+  "tags": ["mlflow", "model-registry", "experiment-tracking"],
+  "sections": ["overview", "experiment-tracking", "model-registry"]
+}

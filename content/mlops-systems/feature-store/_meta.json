@@ -1,0 +1,11 @@
+{
+  "id": "feature-store",
+  "title": "Feature Store",
+  "icon": "⊞",
+  "domain": "mlops-systems",
+  "status": "draft",
+  "order": 3,
+  "subtitle": "Databricks Feature Store — feature engineering and serving",
+  "tags": ["feature-store", "databricks", "unity-catalog"],
+  "sections": ["overview", "architecture", "workflow"]
+}

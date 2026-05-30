@@ -1,0 +1,11 @@
+{
+  "id": "retraining",
+  "title": "Retraining Pipeline",
+  "icon": "↻",
+  "domain": "mlops-systems",
+  "status": "draft",
+  "order": 4,
+  "subtitle": "Scheduled model retraining, validation gates, and promotion",
+  "tags": ["retraining", "mlflow", "azure-devops", "databricks"],
+  "sections": ["overview", "workflow", "configs"]
+}

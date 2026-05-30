@@ -1,0 +1,20 @@
+{
+  "id": "spark-scorer",
+  "title": "Spark Scorer",
+  "icon": "◈",
+  "domain": "mlops-systems",
+  "status": "stable",
+  "order": 1,
+  "subtitle": "Distributed MLflow inference using Spark broadcast and mapInPandas",
+  "tags": ["spark", "mlflow", "pyspark", "inference"],
+  "sections": [
+    "overview",
+    "architecture",
+    "workflow",
+    "configs",
+    "code",
+    "mental-model",
+    "debugging",
+    "kt-notes"
+  ]
+}

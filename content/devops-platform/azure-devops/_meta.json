@@ -1,0 +1,11 @@
+{
+  "id": "azure-devops",
+  "title": "Azure DevOps",
+  "icon": "⬡",
+  "domain": "devops-platform",
+  "status": "wip",
+  "order": 1,
+  "subtitle": "CI/CD pipelines, variable groups, and release strategies",
+  "tags": ["azure-devops", "ci-cd", "pipelines", "yaml"],
+  "sections": ["overview", "pipeline-yaml", "variable-groups", "debugging"]
+}
