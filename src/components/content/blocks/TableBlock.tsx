@@ -1,15 +1,18 @@
 export interface TableBlockProps {
-  headers: string[];
+  headers?: string[];
+  columns?: string[];
   rows: string[][];
 }
 
-export function TableBlock({ headers, rows }: TableBlockProps) {
+export function TableBlock({ headers, columns, rows }: TableBlockProps) {
+  const headerCells = columns ?? headers ?? [];
+
   return (
     <div className="my-5 rounded border border-border overflow-hidden">
       <table className="w-full border-collapse">
         <thead>
           <tr className="bg-codeBg">
-            {headers.map((h, i) => (
+            {headerCells.map((h, i) => (
               <th
                 key={i}
                 className="px-4 py-2.5 text-left text-[11px] font-mono uppercase tracking-wider text-muted border-b border-border"

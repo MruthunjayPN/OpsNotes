@@ -1,0 +1,105 @@
+---
+title: "DEL-001 Score Divergence — Root Cause"
+domain: debugging-log
+topic: del-001-score-divergence
+section: root-cause
+sectionIndex: 3
+status: stable
+priority: high
+tags: [mlflow, pyfunc, schema-enforcement, lightgbm, nan-handling, dtype]
+lastUpdated: "2026-05-30"
+related: [mlflow-patterns, model-registry]
+---
+
+# Root Cause
+
+The bug sits at the intersection of three independent design choices, each reasonable on its own but corrosive in combination.
+
+<Invariant>
+A registered MLflow model schema is a **contract between training-time data shape and inference-time data shape**. Pyfunc enforces this contract strictly. If the contract claims a column is `long` but reality at scoring time produces `float64` with NaN, pyfunc has no safe coercion path and either fails loudly or coerces in ways that distort the model's learned behaviour.
+</Invariant>
+
+## The three contributing decisions
+
+<Cards>
+  <Card title="Registration-time decision" tone="info">
+    The sample-input notebook treated `PUR_TRIPS_48M`, `total_items_returned_48M`, `total_items_purchased_48M` as "genuine counts" and cast them to `int64` before passing to `infer_signature`. Schema baked `long` into the model.
+  </Card>
+  <Card title="Training-time decision" tone="info">
+    The model was actually trained on float-typed data with NaN in these columns for return-heavy / purchase-empty customers. LightGBM learned a **default direction** at every split for routing NaN.
+  </Card>
+  <Card title="Scoring-time decision" tone="info">
+    The MLOps scoring pipeline used `mlflow.pyfunc.load_model`, which inserts schema enforcement between the DataFrame and the LightGBM booster. SME used direct LightGBM `predict()` calls — no enforcement layer.
+  </Card>
+</Cards>
+
+## The collision
+
+<IssueCard
+  severity="high"
+  symptom="6,124 customers with one-directional score divergence (P < SME), all in the return-heavy / purchase-empty population."
+  cause="At scoring time, pyfunc reads the registered schema (`long` for 3 features), sees incoming `float64` data with NaN, and attempts coercion. NaN cannot be safely cast to int64, so either the call fails or NaN-bearing values are converted to 0 (depending on intermediate fix attempts). LightGBM, expecting NaN at those features for this population (default-direction logic kicks in during training), instead receives 0 and routes through a numeric split — different leaf, different score."
+  fix="Re-register the model with `double` schema for all 32 features. Pyfunc no longer needs to coerce; NaN passes through to the LightGBM booster unchanged; default direction logic produces the same score path as SME's unwrapped `predict()` call."
+/>
+
+## Why the symptom was unidirectional (P &lt; SME)
+
+LightGBM's default direction at each split is **learned during training** — usually directed toward whichever side reduces loss more on the training-set NaN-bearing examples. For a return-heavy / purchase-empty customer, the default direction was calibrated to a specific score path.
+
+When pyfunc replaces NaN with 0 (or with the int64 default), the customer routes through the **numeric branch** instead of the **default-direction branch**. For this population, the numeric-branch path consistently produces a lower propensity score than the default-direction path. Hence: every diverging customer has `P < SME`, never `P > SME`.
+
+This unidirectional pattern was the first strong evidence that the divergence was **mechanism-driven**, not random — and that the mechanism touched NaN handling specifically.
+
+## Why SME didn't have this bug
+
+SME's notebook code:
+
+<CodeSnippet
+  title="SME predict call — no schema layer"
+  language="python"
+  file="sme/scoring.py"
+>
+```python
+# loaded_features is a pandas DataFrame with float64 columns and NaN preserved
+pred = model_info.predict(loaded_features)
+```
+</CodeSnippet>
+
+`model_info` here is loaded via `mlflow.lightgbm.load_model` (native flavor loader), which returns the raw LightGBM booster. The booster does not inspect or enforce dtype — it consumes whatever pandas DataFrame is handed in, NaN and all, and runs the learned default-direction routing internally.
+
+The MLOps scoring pipeline used `mlflow.pyfunc.load_model`. Pyfunc wraps the booster in a schema-enforcement layer. **Same model file (.pkl), same trained weights, different inference behaviour** because of the wrapper.
+
+## The two near-miss fixes
+
+Both of these silenced the immediate error but produced incorrect behaviour. Worth documenting so future engineers do not repeat them.
+
+<DataTable
+  columns={["Approach", "What it silenced", "Why it was wrong"]}
+  rows={[
+    [
+      "Cast int-schema cols to Float64 (capital F, nullable)",
+      "Pyfunc 'cannot safely convert' error",
+      "Pandas' Float64 extension type has different conversion semantics from numpy float64. The cast introduced 6,124 spurious NaN values in rows that previously had clean float64 data — replicating the divergence count exactly."
+    ],
+    [
+      "Bypass pyfunc with mlflow.lightgbm.load_model",
+      "Schema enforcement entirely",
+      "Works — but defeats the purpose of the schema layer, which exists to catch real upstream changes (wrong column order, missing features, garbage dtypes). The schema should be correct, not bypassed."
+    ]
+  ]}
+/>
+
+## The data values that mattered
+
+<KeyValue
+  rows={[
+    ["PUR_TRIPS_48M range", "min=0, max=837 (clean float64)"],
+    ["total_items_returned_48M range", "min=−599,795, max=50,881 (clean float64)"],
+    ["total_items_purchased_48M range", "min=−1, max=1,608,741 (clean float64)"],
+    ["NaN count at scoring time (all 3 cols)", "0 in source, 0 after correct cast"],
+    ["Inf count", "0"],
+    ["Negative values explanation", "SME's encoding convention — returns stored as negatives to net against purchases. Model trained on this convention; do not 'fix' the sign."]
+  ]}
+/>
+
+The data was always clean. The contract was wrong.

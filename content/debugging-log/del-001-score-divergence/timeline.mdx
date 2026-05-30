@@ -1,0 +1,95 @@
+---
+title: "DEL-001 Score Divergence — Debug Timeline"
+domain: debugging-log
+topic: del-001-score-divergence
+section: timeline
+sectionIndex: 2
+status: stable
+priority: high
+tags: [debugging, mlflow, pyfunc, lightgbm, del-001]
+lastUpdated: "2026-05-30"
+related: []
+---
+
+# Debug Timeline
+
+The bug moved across four layers as each suspect was eliminated. Documenting the full trail because the **wrong hypotheses are as instructive as the right one**.
+
+<Steps>
+
+  <Step title="Schema cast fix → 19,578 → 6,124">
+    Initial divergence was 19,578 customers. Re-registered model with corrected dtypes (first attempt). Divergence dropped to 6,124 customers, **all one-directional** (`P < SME`).
+
+    **Population profile of the remaining 6,124:** return-heavy, almost no purchase trips, 3+ years since last purchase, `total_items_returned_48M` div_mean −114.6 vs −0.013 in matching set.
+
+    Strong signal: the divergence is **population-specific**, not random.
+  </Step>
+
+  <Step title="Hypothesis 1 — SME fills NaN, MLOps doesn't (REFUTED)">
+    Inspected `preprocessed_data.parquet`: found NaN values in `total_items_purchased_48M` and `Other_items_Sales` for the top diverging customer. Working theory: SME's `impute_missing_zero` fills NaN→0, MLOps's version only drops sparse columns.
+
+    Read both SME and MLOps source for `impute_missing_zero`. **Both functions only drop columns, neither fills NaN.** The name "impute" is misleading. Hypothesis dead.
+  </Step>
+
+  <Step title="Hypothesis 2 — mob_adjustment fillna divergence (REFUTED)">
+    Found `df[new_cols] = df[new_cols].replace([np.inf, -np.inf], np.nan).fillna(0)` in MLOps `add_mob_adjusted_variable` with **no equivalent in SME**. Direction matched: MLOps fills, SME leaves NaN.
+
+    But the `_adj` columns aren't in the final 32-feature columnlist passed to the model. Dead code w.r.t. scoring. Hypothesis dead.
+  </Step>
+
+  <Step title="Built keyed comparison notebook — preprocessing is identical">
+    Wrote a full per-feature comparison notebook keyed on `customer_id`. Compared MLOps and SME preprocessed parquets.
+
+    Result: **0/32 features with any divergence. 0 NaN-count differences. 0 dtype mismatches. All 4.59M customers present in both.**
+
+    Preprocessing is bit-for-bit identical. Bug must live **after** preprocessing.
+  </Step>
+
+  <Step title="Found the real bug — schema enforcement at predict time">
+    Traced through scoring pipeline. `_get_feature_columns` reads the registered schema and casts feature columns to match it. The schema declared `long` (int64) for `PUR_TRIPS_48M`, `total_items_returned_48M`, `total_items_purchased_48M`.
+
+    MLflow pyfunc raised `Incompatible input types for column PUR_TRIPS_48M. Can not safely convert float64 to int64` — the gate was visible in the traceback.
+
+    Root cause confirmed: **the registered schema doesn't match scoring-time reality**. NaN exists in real data; int64 can't hold NaN.
+  </Step>
+
+  <Step title="False detour — Float64 (nullable) cast (CAUSED A NEW 6,124)">
+    First fix attempt: cast `long`-schema columns to pandas' nullable `Float64` (capital F) so NaN survives. This silenced the MLflow error but **introduced 6,124 NaN values** into the feature matrix that weren't there before.
+
+    Same number as the score divergence count. Confirmed via diff check: rows with NaN before `_get_feature_columns` = 0; rows with NaN after = 6,124.
+
+    The fix had become the bug. Backed it out.
+  </Step>
+
+  <Step title="Final fix — re-register model with all-double schema">
+    Modified the sample-input notebook used for model registration: moved the three count features from `LONG_COLS` to `DOUBLE_COLS`, dropped the `fillna(0)`, cast all 32 features to plain `float64`.
+
+    Re-registered the model. Simplified `_get_feature_columns` to a single-line `pd.to_numeric(..., errors="coerce").astype("float64")` for all columns.
+
+    Re-ran scoring. **Score divergence: 0. Rank divergence: 10,084 (0.2%), tie-break only, ±1 decile.**
+  </Step>
+
+</Steps>
+
+## What each "false" step actually taught
+
+<MentalModel
+  pairs={[
+    {
+      q: "Why was Hypothesis 1 (impute_missing_zero fills NaN) worth chasing even though it was wrong?",
+      a: "Because the population profile of the 6,124 was so distinctive (return-heavy, purchase-empty) that any plausible mechanism touching NaN in those features had to be considered. Reading both SME and MLOps source for the suspected function was cheap; trusting the function name 'impute' would have been the real mistake."
+    },
+    {
+      q: "Why didn't the preprocessing comparison notebook reveal the bug?",
+      a: "Because the bug lived in the scoring pipeline's cast step, which runs AFTER the preprocessed parquet is read. The comparison correctly proved that preprocessed data was identical — that was the conclusion that redirected attention to scoring."
+    },
+    {
+      q: "How did the Float64 cast inject 6,124 NaN when the source had 0 NaN?",
+      a: "Pandas' nullable Float64 extension type has different conversion semantics from numpy float64. The cast was non-deterministic for certain values in those specific rows. Root cause was never fully isolated because the right fix — all-double registration — eliminates the need to cast in scoring at all."
+    },
+    {
+      q: "Why is the same number (6,124) appearing from two different mechanisms suspicious but not impossible?",
+      a: "Because both mechanisms target the same population — the customers whose count features need a non-int64-representable value. The first mechanism was pyfunc rejecting NaN; the second was Float64 introducing NaN. Same downstream effect on the same row set."
+    }
+  ]}
+/>

@@ -1,10 +1,29 @@
 export interface IssueCardProps {
-  type: "bug" | "perf";
-  title: string;
+  severity?: "high" | "medium" | "low";
+  type?: "bug" | "perf";
+  title?: string;
   symptom: string;
   cause: string;
   fix: string;
 }
+
+const SEVERITY_CONFIG = {
+  high: {
+    label: "HIGH",
+    headerBg: "bg-redBg",
+    badgeColor: "text-red border-red/30",
+  },
+  medium: {
+    label: "MEDIUM",
+    headerBg: "bg-amberBg",
+    badgeColor: "text-amber border-amber/30",
+  },
+  low: {
+    label: "LOW",
+    headerBg: "bg-codeBg",
+    badgeColor: "text-muted border-border",
+  },
+} as const;
 
 const TYPE_CONFIG = {
   bug: {
@@ -19,8 +38,12 @@ const TYPE_CONFIG = {
   },
 } as const;
 
-export function IssueCard({ type, title, symptom, cause, fix }: IssueCardProps) {
-  const cfg = TYPE_CONFIG[type];
+export function IssueCard({ severity, type, title, symptom, cause, fix }: IssueCardProps) {
+  const cfg = severity
+    ? SEVERITY_CONFIG[severity]
+    : type
+    ? TYPE_CONFIG[type]
+    : SEVERITY_CONFIG.medium;
 
   return (
     <div className="my-5 rounded border border-border overflow-hidden">
@@ -30,7 +53,9 @@ export function IssueCard({ type, title, symptom, cause, fix }: IssueCardProps) 
         >
           {cfg.label}
         </span>
-        <span className="text-[13px] font-semibold text-text">{title}</span>
+        {title && (
+          <span className="text-[13px] font-semibold text-text">{title}</span>
+        )}
       </div>
       {(
         [

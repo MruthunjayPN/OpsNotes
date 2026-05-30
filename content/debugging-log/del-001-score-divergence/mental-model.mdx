@@ -1,0 +1,81 @@
+---
+title: "DEL-001 Score Divergence — Mental Model"
+domain: debugging-log
+topic: del-001-score-divergence
+section: mental-model
+sectionIndex: 5
+status: stable
+priority: high
+tags: [mental-model, mlflow, pyfunc, lightgbm, debugging]
+lastUpdated: "2026-05-30"
+related: []
+---
+
+# Mental Model
+
+The transferable lessons from this debug. These aren't DEL-001 specific.
+
+<Invariant>
+When a parallel-run divergence is **population-specific and unidirectional**, the bug is almost certainly in a deterministic transform that only activates for that population. Random-looking divergence suggests data drift or non-determinism; structured divergence points to a code path with an input-dependent branch.
+</Invariant>
+
+## Core lessons
+
+<MentalModel
+  pairs={[
+    {
+      q: "What's the difference between `mlflow.pyfunc.load_model` and `mlflow.lightgbm.load_model`?",
+      a: "Pyfunc wraps the native model in a schema-enforcement layer. The native loader returns the raw booster. Same .pkl file, same trained weights — but very different inference behaviour when the input data doesn't perfectly match the registered schema. Pyfunc is the right default for production scoring (catches real bugs), but only if the registered schema is correct."
+    },
+    {
+      q: "Why does LightGBM care about NaN at scoring time?",
+      a: "During training, at each tree split, LightGBM observes which side of the split the NaN-bearing examples land. It picks the side that minimises loss and stores that as the 'default direction' for that split. At inference, NaN routes through the default direction. If you replace NaN with 0 before inference, the value routes through the numeric split instead — usually producing a different leaf, and therefore a different score."
+    },
+    {
+      q: "Why is 'int64 with NaN' an impossible state in pandas?",
+      a: "Numpy's int64 is a fixed-width integer with no sentinel for missing values. NaN is a float64 concept (IEEE 754 quiet NaN). Pandas has a nullable extension type (Int64, capital I) that can hold NA, but it has different conversion semantics from numpy types and is not always safe to use in places that expect numpy arrays — like LightGBM internals."
+    },
+    {
+      q: "What does 'schema enforcement' actually mean at inference?",
+      a: "Pyfunc reads `model.metadata.get_input_schema()` at load time. On every `predict()` call, it checks the incoming DataFrame's dtypes against the schema. If a column is declared `long` but incoming is `double`, pyfunc attempts a safe cast — fails if values would be lost (e.g. NaN→int), succeeds silently if not. The 'silent success' path is the dangerous one because it changes data without warning."
+    },
+    {
+      q: "When should I register a count column as `long` vs `double`?",
+      a: "If the column can ever be NaN at scoring time — register as `double`. The integer-ness of the values is meaningless to gradient-boosted tree models; what matters is whether NaN can pass through. 'It's a count, so it should be int' is a training-data thought, not a scoring-data thought."
+    },
+    {
+      q: "Why was the population-specific unidirectional pattern such a strong clue?",
+      a: "Random or two-directional divergence suggests numerical instability, ordering issues, or data drift — bugs that aren't tied to a specific code path. Unidirectional + population-specific means there's a deterministic branch in the code that processes that population differently. Find the branch, find the bug."
+    },
+    {
+      q: "When parallel-run validation shows score match but rank mismatch — is it a bug?",
+      a: "Usually no. `pd.qcut` with `method='first'` breaks ties by physical row order, which is non-deterministic in Spark. Tied scores at decile boundaries will move ±1 decile between runs of the same code. Document it, don't 'fix' it. If exact rank reproducibility matters, add a deterministic secondary sort (e.g. by customer_id) before ranking — but the reference run needs the same sort."
+    }
+  ]}
+/>
+
+## The "the fix became the bug" pattern
+
+<IssueCard
+  severity="medium"
+  symptom="Applied a fix, the original error went away, but a different error appeared with suspiciously similar magnitude (same 6,124 rows affected)."
+  cause="The fix targeted the symptom (silence the pyfunc cast error) rather than the contract (the schema is wrong). Casting to Float64 silenced the error but introduced NaN into rows that didn't have NaN before — different mechanism, same downstream effect on the same population."
+  fix="Stop. When a fix produces a same-magnitude error of a different shape, the diagnosis is incomplete. The underlying contract is still wrong. Don't iterate on the workaround; back out and address the root cause (schema registration)."
+/>
+
+## Debugging heuristics this case reinforced
+
+<Cards>
+  <Card title="Read the function, not the function name" tone="info">
+    `impute_missing_zero` does not impute. It only drops columns. Two engineers (SME and MLOps) named the function the same way, both with the misleading name. Spent an iteration on a dead hypothesis because the name implied a behaviour the code didn't have.
+  </Card>
+  <Card title="Build the keyed comparison early" tone="info">
+    A full per-feature, per-customer comparison notebook took 30 minutes to write and eliminated four hypotheses at once. It proved preprocessing was identical and redirected attention to the right layer. Should have been step one, not step five.
+  </Card>
+  <Card title="Trust the unidirectional signal" tone="info">
+    `P < SME` always, never `P > SME`, in a specific customer profile — that pattern alone narrows the bug to a deterministic transform that activates for those customers. Treat it as the strongest available clue.
+  </Card>
+  <Card title="Same magnitude → same population" tone="info">
+    When two different mechanisms produce the same count of affected rows, it's almost never coincidence. Both mechanisms target the same population for the same underlying reason. Use that as a diagnostic, not a confusion.
+  </Card>
+</Cards>

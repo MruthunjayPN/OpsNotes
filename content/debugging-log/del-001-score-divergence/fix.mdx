@@ -1,0 +1,123 @@
+---
+title: "DEL-001 Score Divergence — Fix"
+domain: debugging-log
+topic: del-001-score-divergence
+section: fix
+sectionIndex: 4
+status: stable
+priority: high
+tags: [mlflow, model-registry, lightgbm, schema, fix]
+lastUpdated: "2026-05-30"
+related: [model-registry, mlflow-patterns]
+---
+
+# The Fix
+
+Two-part fix. Both parts are required — applying only one fails.
+
+<Invariant>
+The registered schema must reflect what real scoring data looks like, including NaN-bearing columns. For count-style features that are nullable at scoring time, register as `double`, not `long`. Then the scoring pipeline never needs dtype-branching logic — it just hands a `float64` DataFrame to pyfunc and lets the booster do its job.
+</Invariant>
+
+## Part 1 — Re-register the model with all-double schema
+
+<CodeSnippet
+  title="Sample input prep — corrected"
+  language="python"
+  file="utils/del_001_sample_input.py"
+>
+```python
+# All 32 features go to DOUBLE_COLS — no LONG_COLS for nullable counts
+LONG_COLS = []
+DOUBLE_COLS = FEATURE_COLS  # all 32
+
+assert len(FEATURE_COLS) == 32
+assert len(LONG_COLS) + len(DOUBLE_COLS) == 32
+
+# Cast everything to float64, preserving NaN
+for col in FEATURE_COLS:
+    sample[col] = pd.to_numeric(sample[col], errors="coerce").astype("float64")
+
+# No fillna(0). NaN must reach the booster so the learned default direction is used.
+# infer_signature will now read float64 dtypes and emit a schema with 32 "double" entries.
+```
+</CodeSnippet>
+
+Validation after re-registration:
+
+<CodeSnippet
+  title="Verify the registered schema"
+  language="python"
+  file="utils/verify_schema.py"
+>
+```python
+import mlflow
+model = mlflow.pyfunc.load_model("models:/dev_model_registry.marketing.del_001_propensity_to_open_lgb@ready")
+schema = model.metadata.get_input_schema()
+for col_spec in schema.inputs:
+    assert str(col_spec.type).lower() == "double", f"{col_spec.name} is {col_spec.type}, expected double"
+print(f"All {len(schema.inputs)} features registered as double — schema correct.")
+```
+</CodeSnippet>
+
+## Part 2 — Simplify `_get_feature_columns` in scoring pipeline
+
+The previous implementation read the schema and branched on dtype. With an all-double schema, no branching is needed.
+
+<CodeSnippet
+  title="scoring.py — _get_feature_columns final"
+  language="python"
+  file="src/pipelines/del_001/scoring.py"
+>
+```python
+def _get_feature_columns(self, pdf: pd.DataFrame) -> pd.DataFrame:
+    """
+    Cast feature columns to float64, preserving NaN for LightGBM's
+    learned default-direction routing.
+
+    With the registered schema set to `double` for all features,
+    no dtype-branching is required. A single cast is sufficient.
+    """
+    try:
+        for col_name in pdf.columns:
+            pdf[col_name] = pd.to_numeric(pdf[col_name], errors="coerce").astype("float64")
+        self.logger.info("Feature type casting complete")
+        return pdf
+    except Exception:
+        self.logger.exception("Error during feature type casting")
+        raise
+```
+</CodeSnippet>
+
+## Why both parts are required
+
+<DataTable
+  columns={["Scenario", "Outcome"]}
+  rows={[
+    ["Part 1 only (re-register, keep old scoring code)", "Old scoring code still reads schema and branches on 'long' — but schema no longer has 'long' entries, so the int-cast path never runs. Works, but leaves dead and confusing code."],
+    ["Part 2 only (simplify scoring, keep old schema)", "Pyfunc still enforces 'long' on 3 columns. Float64 input is rejected with 'cannot safely convert float64 to int64'. Scoring fails immediately."],
+    ["Both parts", "Schema accepts float64. Scoring code casts cleanly. NaN survives to LightGBM. Score divergence collapses to zero."]
+  ]}
+/>
+
+## Validation results
+
+After both fixes applied and scoring re-run on 4.59M customers:
+
+<KeyValue
+  rows={[
+    ["Rows with non-zero score_diff", "0"],
+    ["Score precision match", "1e-10 (effectively exact)"],
+    ["Rows with non-zero rank_diff", "10,084 (0.2%)"],
+    ["Max abs rank_diff", "1 (single decile drift)"],
+    ["Rank drift cause", "Tie-break ordering on customers with identical scores at decile boundaries"]
+  ]}
+/>
+
+The remaining 0.2% rank drift is acceptable parallel-run tolerance — see [Mental Model](#) section for the explanation.
+
+## What this fix means for future model registrations
+
+<Callout type="warning" title="Registration policy">
+For any model where a feature column can legitimately be NaN at scoring time (counts for inactive customers, ratios with zero denominators, aggregates over empty windows) — **register the column as `double` in the schema**, regardless of how the training-data dtype looks. The int-vs-float distinction is meaningless to LightGBM/XGBoost/CatBoost at inference time; what matters is whether NaN can pass through to the booster.
+</Callout>

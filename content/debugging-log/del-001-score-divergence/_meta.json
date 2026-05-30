@@ -1,0 +1,18 @@
+{
+  "id": "del-001-score-divergence",
+  "title": "DEL-001 Score Divergence",
+  "icon": "▲",
+  "domain": "debugging-log",
+  "status": "stable",
+  "order": 1,
+  "subtitle": "Parallel-run divergence between MLOps inference pipeline and SME reference — full root-cause trail and fix",
+  "tags": ["mlflow", "pyfunc", "schema-enforcement", "lightgbm", "nan-handling", "parallel-run", "dtype", "del-001"],
+  "sections": [
+    "overview",
+    "timeline",
+    "root-cause",
+    "fix",
+    "mental-model",
+    "kt-notes"
+  ]
+}

@@ -1,10 +1,12 @@
+import type { ReactNode } from "react";
 import { codeToHtml } from "shiki";
 
 export interface CodeSnippetBlockProps {
   title: string;
   language: string;
   file?: string;
-  code: string;
+  code?: string;
+  children?: ReactNode;
 }
 
 export async function CodeSnippetBlock({
@@ -12,23 +14,27 @@ export async function CodeSnippetBlock({
   language,
   file,
   code,
+  children,
 }: CodeSnippetBlockProps) {
-  const highlighted = await codeToHtml(code.trim(), {
-    lang: language,
-    themes: {
-      light: "github-light",
-      dark: "github-dark",
-    },
-    defaultColor: "light",
-    transformers: [
-      {
-        pre(node) {
-          node.properties.style =
-            "font-size: 12.5px; line-height: 1.65; padding: 1rem; overflow-x: auto; margin: 0;";
-        },
+  let highlighted: string | undefined;
+  if (code) {
+    highlighted = await codeToHtml(code.trim(), {
+      lang: language,
+      themes: {
+        light: "github-light",
+        dark: "github-dark",
       },
-    ],
-  });
+      defaultColor: "light",
+      transformers: [
+        {
+          pre(node) {
+            node.properties.style =
+              "font-size: 12.5px; line-height: 1.65; padding: 1rem; overflow-x: auto; margin: 0;";
+          },
+        },
+      ],
+    });
+  }
 
   return (
     <div className="my-5 rounded border border-border overflow-hidden">
@@ -48,11 +54,17 @@ export async function CodeSnippetBlock({
           {language}
         </span>
       </div>
-      {/* Highlighted code */}
-      <div
-        className="font-mono bg-codeBg"
-        dangerouslySetInnerHTML={{ __html: highlighted }}
-      />
+      {/* Code area — either shiki-highlighted string or MDX child pre block */}
+      {highlighted ? (
+        <div
+          className="font-mono bg-codeBg"
+          dangerouslySetInnerHTML={{ __html: highlighted }}
+        />
+      ) : (
+        <div className="bg-codeBg [&>div]:!my-0 [&_pre]:!rounded-none [&_pre]:!border-0">
+          {children}
+        </div>
+      )}
     </div>
   );
 }

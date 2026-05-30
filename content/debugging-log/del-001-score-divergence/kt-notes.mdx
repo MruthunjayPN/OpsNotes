@@ -1,0 +1,85 @@
+---
+title: "DEL-001 Score Divergence — KT Notes"
+domain: debugging-log
+topic: del-001-score-divergence
+section: kt-notes
+sectionIndex: 6
+status: stable
+priority: medium
+tags: [kt, handoff, mlflow, lightgbm]
+lastUpdated: "2026-05-30"
+related: []
+---
+
+# KT Notes
+
+For anyone picking up this model or hitting a similar parallel-run divergence on a different model.
+
+<KTNote
+  coverage="95%"
+  understood={[
+    "MLflow pyfunc inserts a schema enforcement layer between input DataFrame and the underlying booster — this is the source of the divergence",
+    "LightGBM learns a default direction for NaN at each tree split during training; replacing NaN with 0 at inference routes through a different path and changes scores",
+    "Pandas int64 cannot hold NaN; any nullable count column must be registered as `double` for the model to behave correctly under pyfunc",
+    "Population-specific, unidirectional divergence is a strong signal for a deterministic code-path bug — not random noise",
+    "The 0.2% rank drift after score match is a tie-break artifact from non-deterministic Spark row ordering — benign, no business impact"
+  ]}
+  unclear={[
+    "Exact internal mechanism by which pandas' nullable Float64 (capital F) cast introduces NaN on clean float64 data for some rows — bypassed by using lowercase float64 everywhere; never fully isolated",
+    "Whether other models in the registry have the same `long` schema bug and have been silently producing wrong scores in production — would need an audit",
+    "Whether MLflow has a config flag to make schema enforcement strict-fail-only (no silent coercion) — would be valuable as a defensive default"
+  ]}
+/>
+
+## Replay this case on a new model
+
+If you're investigating a parallel-run divergence on a different model and want to follow the same path:
+
+<Steps>
+  <Step title="Get the divergence count and direction">
+    How many customers diverge? Is it bidirectional or unidirectional? Unidirectional + population-specific = deterministic code-path bug.
+  </Step>
+
+  <Step title="Profile the diverging population">
+    What do those customers have in common? Demographic, behavioural, data-shape (lots of NaN? Lots of zeros? Edge-case values?). This profile is your strongest clue.
+  </Step>
+
+  <Step title="Build the keyed preprocessing comparison notebook">
+    Use the template from this debug — load both MLOps and SME preprocessed parquets, align on customer_id, diff every feature. Eliminates preprocessing as a suspect (or finds the bug) in one shot.
+  </Step>
+
+  <Step title="If preprocessing is identical, look at scoring">
+    Specifically: how is the model loaded? `mlflow.pyfunc.load_model` enables schema enforcement; `mlflow.{flavor}.load_model` does not. SME usually uses the flavor loader; MLOps usually uses pyfunc. Check the registered schema with `model.metadata.get_input_schema()`.
+  </Step>
+
+  <Step title="Compare schema dtypes against actual scoring data dtypes">
+    Any column where schema says `long` and scoring data has NaN — that's the bug.
+  </Step>
+
+  <Step title="Fix at the contract layer, not the workaround layer">
+    Re-register the model with corrected schema. Don't try to silence the pyfunc error with type casts in the scoring code — that path leads to "the fix becomes the bug".
+  </Step>
+</Steps>
+
+## Related context
+
+- The SME notebook framework calls `mlflow.models.infer_signature(sample, model_output=...)` to build the schema. Schema dtypes come **directly from the pandas dtypes of the sample**. If your sample-prep notebook casts a column to int64, the registered schema gets `long` for that column. This is where the bug enters the system.
+
+- `pd.qcut(...).rank(method='first')` is used for decile ranking in both SME and MLOps. `method='first'` is documented as "ranks assigned in order they appear in the array" — i.e. tie-break by row order. Since Spark doesn't guarantee row order on parquet reads, two runs of the same code can produce different rank assignments for tied customers. Acceptable parallel-run tolerance for most use cases; if exact reproducibility is required, add a deterministic secondary sort.
+
+- The MLOps preprocessing pipeline includes a function literally named `_impute_missing_zero` that does not impute anything — only drops columns above missingness/zero-rate thresholds. The SME version has the same misleading name. Worth renaming in both codebases when the opportunity arises.
+
+## Quick reference — files touched
+
+<DataTable
+  columns={["File", "Change"]}
+  rows={[
+    ["utils/del_001_sample_input.py", "Move 3 count cols from LONG_COLS to DOUBLE_COLS, drop fillna(0), cast all to float64"],
+    ["src/pipelines/del_001/scoring.py — _get_feature_columns", "Simplify to single-line pd.to_numeric().astype('float64') for all cols; drop dtype branching"],
+    ["Model registry — del_001_propensity_to_open_lgb", "Re-register with corrected schema (all features as 'double')"]
+  ]}
+/>
+
+## Sign-off
+
+Parallel-run validated against SME reference. Score match exact (1e-10 precision). Rank match 99.8% (0.2% tie-break drift, ±1 decile, no business impact). Ready for production.
