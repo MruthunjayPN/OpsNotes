@@ -37,7 +37,10 @@ const components = {
 };
 
 const prettyCodeOptions: PrettyCodeOptions = {
-  theme: "github-light",
+  theme: {
+    light: "github-light",
+    dark: "github-dark",
+  },
   keepBackground: false,
 };
 

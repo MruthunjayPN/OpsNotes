@@ -32,7 +32,7 @@ export function KTNoteBlock({
             <div
               className="w-6 h-6 rounded-full bg-accent/20"
               style={{
-                background: `conic-gradient(#C2410C ${coverage * 3.6}deg, transparent 0deg)`,
+                background: `conic-gradient(rgb(var(--accent)) ${coverage * 3.6}deg, transparent 0deg)`,
               }}
             />
           </div>

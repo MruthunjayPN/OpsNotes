@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { formatSectionLabel } from "@/lib/format";
+import { ThemeToggle } from "./ThemeToggle";
 
 interface TopBarProps {
   domain: string;
@@ -41,12 +42,15 @@ export function TopBar({
         </span>
       </nav>
 
-      {/* Last updated */}
-      {lastUpdated && (
-        <span className="text-[11px] font-mono text-muted tracking-wide">
-          Updated {lastUpdated}
-        </span>
-      )}
+      {/* Right side: last updated + theme toggle */}
+      <div className="flex items-center gap-3">
+        {lastUpdated && (
+          <span className="text-[11px] font-mono text-muted tracking-wide">
+            Updated {lastUpdated}
+          </span>
+        )}
+        <ThemeToggle />
+      </div>
     </header>
   );
 }

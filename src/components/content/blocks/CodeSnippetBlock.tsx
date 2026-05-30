@@ -15,13 +15,16 @@ export async function CodeSnippetBlock({
 }: CodeSnippetBlockProps) {
   const highlighted = await codeToHtml(code.trim(), {
     lang: language,
-    theme: "github-light",
+    themes: {
+      light: "github-light",
+      dark: "github-dark",
+    },
+    defaultColor: "light",
     transformers: [
       {
         pre(node) {
-          // Use our design system background
           node.properties.style =
-            "background-color: #F5F5F1; font-size: 12.5px; line-height: 1.65; padding: 1rem; overflow-x: auto; margin: 0;";
+            "font-size: 12.5px; line-height: 1.65; padding: 1rem; overflow-x: auto; margin: 0;";
         },
       },
     ],
@@ -47,7 +50,7 @@ export async function CodeSnippetBlock({
       </div>
       {/* Highlighted code */}
       <div
-        className="font-mono"
+        className="font-mono bg-codeBg"
         dangerouslySetInnerHTML={{ __html: highlighted }}
       />
     </div>
