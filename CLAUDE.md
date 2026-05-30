@@ -13,61 +13,118 @@ technical notes, architecture learnings, MLOps/DevOps concepts, project document
 workflows, code explanations, KT notes, debugging logs, and long-term engineering knowledge.
 
 This is NOT a generic notes app. It is a professional engineering documentation system
-modeled on the Claude Code docs aesthetic — light theme, minimal, highly readable,
-optimized for long-form technical content.
+modeled on the Claude Code docs aesthetic — minimal, highly readable, optimized for
+long-form technical content.
 
 ---
 
 ## Tech Stack
 
-| Layer         | Choice                          | Reason                                              |
-|---------------|---------------------------------|-----------------------------------------------------|
-| Framework     | Next.js 14 (App Router)         | File-based routing, RSC, static export capable      |
-| Language      | TypeScript (strict)             | Type safety across content schema and components    |
-| Styling       | Tailwind CSS                    | Utility-first, consistent spacing and color system  |
-| Content       | MDX (next-mdx-remote)           | Markdown + custom React blocks, Git-native          |
-| Frontmatter   | gray-matter                     | Parse YAML metadata from MDX files                  |
-| Syntax HL     | Shiki                           | Server-side, zero-flash code highlighting           |
-| Search        | Pagefind                        | Static search index built at `next build`, fast     |
-| State         | Zustand                         | Sidebar collapse, pinned pages, recent history      |
-| Diagrams      | Mermaid.js (client-side)        | Rendered from fenced code blocks in MDX             |
-| Fonts         | DM Sans + JetBrains Mono        | Body + code, consistent with design spec            |
+| Layer       | Choice                  | Reason                                             |
+|-------------|-------------------------|----------------------------------------------------|
+| Framework   | Next.js 14 (App Router) | File-based routing, RSC, static export capable     |
+| Language    | TypeScript (strict)     | Type safety across content schema and components   |
+| Styling     | Tailwind CSS            | Utility-first, consistent spacing and color system |
+| Content     | MDX (next-mdx-remote)   | Markdown + custom React blocks, Git-native         |
+| Frontmatter | gray-matter             | Parse YAML metadata from MDX files                 |
+| Syntax HL   | Shiki                   | Server-side, zero-flash code highlighting          |
+| Search      | Pagefind                | Static search index built at `next build`, fast    |
+| State       | Zustand                 | Sidebar collapse, theme, pinned pages, recents     |
+| Diagrams    | Mermaid.js (client)     | Rendered from fenced code blocks in MDX            |
+| Fonts       | DM Sans + JetBrains Mono| Body + code, consistent with design spec           |
+
+Config file is `next.config.mjs` (not `.ts` — Next.js 14 doesn't support TS config).
 
 ---
 
 ## Design System
 
 ### Theme
-- Light theme ONLY. No dark mode toggle (intentional).
-- Aesthetic: Claude Code docs — neutral, minimal, distraction-free.
-- No vibrant colors, no gradients, no shadows on cards.
 
-### Color Tokens (defined in `tailwind.config.ts` and `src/styles/tokens.ts`)
+Light and dark themes are both supported. Toggle is **user-controlled** (☀/◑ button in
+TopBar), not system preference. Theme class (`dark`) is applied to `<html>`. Preference is
+persisted to `localStorage` via Zustand.
 
+Aesthetic: neutral, minimal, distraction-free. No vibrant colors, no gradients, no shadows.
+
+### Color Tokens
+
+Tokens are CSS variables defined in `src/styles/globals.css` as RGB channels (not hex) so
+Tailwind's opacity modifier syntax (`bg-codeBg/40`, `border-accent/30`) works correctly.
+
+Tailwind colors in `tailwind.config.ts` are wired as:
+```ts
+accent: "rgb(var(--accent) / <alpha-value>)"
 ```
-bg:       #FAFAF9   (page background)
-sideBg:   #F3F3EF   (sidebar background)
-cardBg:   #FFFFFF   (card / surface)
-codeBg:   #F5F5F1   (inline code, code blocks, key-value rows)
-hover:    #EAEAE5
-active:   #E4E4DE
-border:   #E2E2DA
-text:     #1C1C1A   (primary text)
-sub:      #565650   (secondary text)
-muted:    #9A9A90   (hints, labels, placeholders)
-accent:   #C2410C   (active nav, links, step numbers — burnt orange)
-accentBg: #FFF7ED
-blue:     #1D4ED8   (Q badges in mental model blocks)
-blueBg:   #EFF6FF
-green:    #166534   (success, understood, stable badge)
-greenBg:  #F0FDF4
-amber:    #92400E   (WIP badge, unclear items, perf issues)
-amberBg:  #FFFBEB
-red:      #991B1B   (bug issues)
-redBg:    #FEF2F2
+
+Use Tailwind token names in components — **never hardcode hex values**:
+```tsx
+// Correct
+<div className="bg-bg text-text border-border" />
+
+// Wrong — do not do this
+<div style={{ background: "#FAFAF9" }} />
+```
+
+Exception: computed inline styles (e.g. conic-gradient widths) must use `rgb(var(--token))`:
+```tsx
+style={{ background: `conic-gradient(rgb(var(--accent)) ${pct}deg, transparent 0)` }}
+```
+
+#### Light tokens (`:root`)
+
+| Token      | Value     | Usage                                    |
+|------------|-----------|------------------------------------------|
+| `--bg`     | #FAFAF9   | Page background                          |
+| `--side-bg`| #F3F3EF   | Sidebar background                       |
+| `--card-bg`| #FFFFFF   | Card / surface                           |
+| `--code-bg`| #F5F5F1   | Code blocks, key-value rows              |
+| `--hover`  | #EAEAE5   | Hover state                              |
+| `--active` | #E4E4DE   | Active / pressed state                   |
+| `--border` | #E2E2DA   | Borders, dividers                        |
+| `--text`   | #1C1C1A   | Primary text                             |
+| `--sub`    | #565650   | Secondary text                           |
+| `--muted`  | #9A9A90   | Hints, labels, placeholders              |
+| `--accent` | #C2410C   | Active nav, links, step numbers (orange) |
+| `--accent-bg` | #FFF7ED| Accent tint background                   |
+| `--blue` / `--blue-bg`   | #1D4ED8 / #EFF6FF | Q badges in MentalModel |
+| `--green` / `--green-bg` | #166534 / #F0FDF4 | Stable badge, understood |
+| `--amber` / `--amber-bg` | #92400E / #FFFBEB | WIP badge, unclear items |
+| `--red` / `--red-bg`     | #991B1B / #FEF2F2 | Bug issues               |
+
+#### Dark tokens (`.dark`)
+
+| Token      | Value     | Note                        |
+|------------|-----------|-----------------------------|
+| `--bg`     | #18171C   | Near-black, warm grey       |
+| `--side-bg`| #1F1E24   | Slightly lighter than bg    |
+| `--card-bg`| #26242C   | Card surface                |
+| `--code-bg`| #2C2A33   | Code blocks                 |
+| `--hover`  | #2E2C36   |                             |
+| `--active` | #35323F   |                             |
+| `--border` | #38353F   | Subtle warm grey            |
+| `--text`   | #F0EEE9   | Off-white, warm             |
+| `--sub`    | #A8A49E   | Secondary text              |
+| `--muted`  | #635F5A   | Hints, labels               |
+| `--accent` | #F97316   | Brighter orange in dark     |
+| `--accent-bg` | #2A1A0E| Deep burnt orange tint      |
+| `--blue` / `--blue-bg`   | #60A5FA / #1A2535 |          |
+| `--green` / `--green-bg` | #4ADE80 / #0F2318 |          |
+| `--amber` / `--amber-bg` | #FCD34D / #2A1F00 |          |
+| `--red` / `--red-bg`     | #F87171 / #2A1010 |          |
+
+### Syntax Highlighting (Shiki)
+
+Both `CodeSnippetBlock` (shiki direct) and MDX fenced blocks (rehype-pretty-code) use
+dual-theme: `{ light: "github-light", dark: "github-dark" }`. Dark-mode token colors are
+applied via:
+```css
+.dark code[data-theme*=' '] span { color: var(--shiki-dark) !important; }
+.dark .shiki span               { color: var(--shiki-dark) !important; }
 ```
 
 ### Typography
+
 - Body: DM Sans, 400/500/600 weights only. Never 700+.
 - Code: JetBrains Mono, 400/500.
 - Base body size: 14px, line-height 1.7.
@@ -75,6 +132,7 @@ redBg:    #FEF2F2
 - Labels / metadata: 10–11px, JetBrains Mono, uppercase, letterSpacing 0.08em.
 
 ### Spacing
+
 - Page content padding: 24px 28px.
 - Max content width: 840px.
 - Section gap (between blocks): 24px.
@@ -85,12 +143,16 @@ redBg:    #FEF2F2
 ## Folder Structure
 
 ```
-eng-knowledge-platform/
-├── CLAUDE.md                          ← this file
+OpsNotes/
+├── CLAUDE.md
+├── next.config.mjs                        ← note: .mjs not .ts
+├── tailwind.config.ts
+├── tsconfig.json
+├── package.json
 ├── content/
 │   ├── mlops-systems/
 │   │   ├── spark-scorer/
-│   │   │   ├── _meta.json             ← topic metadata (title, icon, order, tags)
+│   │   │   ├── _meta.json                 ← topic metadata (title, icon, order, tags)
 │   │   │   ├── 01-overview.mdx
 │   │   │   ├── 02-architecture.mdx
 │   │   │   ├── 03-workflow.mdx
@@ -111,65 +173,62 @@ eng-knowledge-platform/
 │   └── debugging-log/
 ├── src/
 │   ├── app/
-│   │   ├── layout.tsx                 ← root layout (fonts, sidebar shell)
-│   │   ├── page.tsx                   ← redirect to /mlops-systems/spark-scorer/overview
-│   │   └── [domain]/
-│   │       └── [topic]/
-│   │           └── [section]/
-│   │               └── page.tsx       ← dynamic MDX renderer page
+│   │   ├── layout.tsx                     ← root layout: sidebar shell, no-FOUC theme script
+│   │   ├── page.tsx                       ← redirect → /mlops-systems/spark-scorer/overview
+│   │   └── [domain]/[topic]/[section]/
+│   │       └── page.tsx                   ← dynamic MDX renderer page
 │   ├── components/
 │   │   ├── layout/
-│   │   │   ├── Sidebar.tsx
-│   │   │   ├── TopBar.tsx             ← breadcrumb + last updated
-│   │   │   └── TOC.tsx                ← right-side heading anchors
+│   │   │   ├── Sidebar.tsx                ← collapsible, search input, nav tree
+│   │   │   ├── TopBar.tsx                 ← breadcrumb + last updated + theme toggle
+│   │   │   ├── ThemeToggle.tsx            ← client component: ☀/◑ button
+│   │   │   └── TOC.tsx                    ← right-side heading anchors
 │   │   ├── content/
-│   │   │   ├── MDXRenderer.tsx        ← wraps next-mdx-remote with component map
-│   │   │   ├── CodeBlock.tsx          ← Shiki highlighted, copy button
-│   │   │   ├── MermaidDiagram.tsx     ← client-side mermaid renderer
-│   │   │   ├── blocks/
-│   │   │   │   ├── InvariantBlock.tsx
-│   │   │   │   ├── CardsBlock.tsx
-│   │   │   │   ├── KeyValueBlock.tsx
-│   │   │   │   ├── FlowBlock.tsx
-│   │   │   │   ├── TableBlock.tsx
-│   │   │   │   ├── StepsBlock.tsx
-│   │   │   │   ├── MentalModelBlock.tsx
-│   │   │   │   ├── IssueCard.tsx
-│   │   │   │   ├── KTNoteBlock.tsx
-│   │   │   │   └── CodeSnippetBlock.tsx   ← for the /code section per topic
-│   │   │   └── SectionTabs.tsx
+│   │   │   ├── MDXRenderer.tsx            ← next-mdx-remote/rsc + component map
+│   │   │   ├── CodeBlock.tsx              ← pre override: copy button, bg-codeBg
+│   │   │   ├── MermaidDiagram.tsx         ← client-only, dynamic import
+│   │   │   ├── SectionTabs.tsx            ← horizontal section tab strip
+│   │   │   └── blocks/
+│   │   │       ├── InvariantBlock.tsx
+│   │   │       ├── CardsBlock.tsx
+│   │   │       ├── KeyValueBlock.tsx
+│   │   │       ├── FlowBlock.tsx
+│   │   │       ├── TableBlock.tsx
+│   │   │       ├── StepsBlock.tsx
+│   │   │       ├── MentalModelBlock.tsx
+│   │   │       ├── IssueCard.tsx
+│   │   │       ├── KTNoteBlock.tsx
+│   │   │       ├── CodeSnippetBlock.tsx   ← async RSC, shiki dual-theme
+│   │   │       └── Callout.tsx
 │   │   ├── navigation/
 │   │   │   ├── NavTree.tsx
-│   │   │   └── SearchModal.tsx        ← Cmd+K, Pagefind-powered
+│   │   │   └── SearchModal.tsx            ← Cmd+K, Pagefind-powered
 │   │   └── ui/
-│   │       ├── Badge.tsx              ← stable / wip / draft
+│   │       ├── Badge.tsx
 │   │       └── Tag.tsx
 │   ├── lib/
-│   │   ├── content.ts                 ← MDX loader, frontmatter parser
-│   │   ├── navigation.ts              ← builds nav tree from _meta.json files
-│   │   ├── search.ts                  ← Pagefind integration helpers
-│   │   └── related.ts                 ← resolves related pages from frontmatter tags
+│   │   ├── content.ts                     ← MDX loader + frontmatter parser
+│   │   ├── navigation.ts                  ← builds nav tree from _meta.json (server-only)
+│   │   ├── format.ts                      ← client-safe formatSectionLabel()
+│   │   ├── search.ts
+│   │   └── related.ts
 │   ├── store/
-│   │   └── ui.ts                      ← Zustand: sidebar state, pinned pages, recents
+│   │   └── ui.ts                          ← Zustand: sidebar, theme, pinned, recents
 │   ├── styles/
-│   │   ├── globals.css
-│   │   └── tokens.ts                  ← color + typography constants (TS)
+│   │   ├── globals.css                    ← :root / .dark token blocks, MDX prose
+│   │   └── tokens.ts                      ← light / dark token objects (TS)
 │   └── types/
-│       ├── content.ts                 ← MDX frontmatter schema types
-│       └── navigation.ts              ← NavItem, NavGroup types
-├── public/
-│   └── diagrams/                      ← Excalidraw SVG exports
-├── next.config.ts
-├── tailwind.config.ts
-├── tsconfig.json
-└── package.json
+│       ├── content.ts                     ← MDX frontmatter schema
+│       └── navigation.ts                  ← NavItem, NavGroup types
+└── public/
+    └── diagrams/                          ← Excalidraw SVG exports
 ```
 
 ---
 
 ## Content Model
 
-### MDX Frontmatter Schema (TypeScript type in `src/types/content.ts`)
+### MDX Frontmatter Schema (`src/types/content.ts`)
 
 Every `.mdx` file must have this header:
 
@@ -189,7 +248,7 @@ ktSession: "Session 1 — Apr 2025"   # optional
 ---
 ```
 
-### _meta.json Schema (per topic folder)
+### `_meta.json` Schema (per topic folder)
 
 ```json
 {
@@ -212,33 +271,32 @@ ktSession: "Session 1 — Apr 2025"   # optional
 
 ## Block Types (MDX Components)
 
-These are the custom components available inside every `.mdx` file.
-All accept typed props — see `src/components/content/blocks/` for interfaces.
+All components are in `src/components/content/blocks/` with exported TypeScript interfaces.
+Register new ones in `MDXRenderer.tsx`'s component map — never add a block type without doing this.
 
-| Component           | Purpose                                               |
-|---------------------|-------------------------------------------------------|
-| `<Invariant>`        | Core system invariant — orange left-border callout    |
-| `<Cards>`            | 2–3 column grid of concept cards                      |
-| `<KeyValue>`         | Horizontal key → value table (system facts)           |
-| `<Flow>`             | Step-by-step horizontal flow diagram                  |
-| `<DataTable>`        | Comparison / config parameter table                   |
-| `<Steps>`            | Numbered walkthrough (workflow steps)                 |
-| `<MentalModel>`      | Q&A pairs for mental model building                   |
-| `<IssueCard>`        | Bug/Perf issue with symptom / cause / fix             |
-| `<KTNote>`           | KT session block with coverage %, understood, unclear |
-| `<CodeSnippet>`      | Named code panel with language, Shiki highlighting    |
-| `<Callout>`          | Generic note / tip / warning callout                  |
-| `<MermaidDiagram>`   | Inline mermaid diagram from a code string             |
+| Component         | MDX tag          | Purpose                                        |
+|-------------------|------------------|------------------------------------------------|
+| InvariantBlock    | `<Invariant>`    | Core system invariant — orange left-border     |
+| CardsBlock        | `<Cards>`        | 2–3 column grid of concept cards               |
+| KeyValueBlock     | `<KeyValue>`     | Key → value table (system facts)               |
+| FlowBlock         | `<Flow>`         | Step-by-step horizontal flow diagram           |
+| TableBlock        | `<DataTable>`    | Comparison / config parameter table            |
+| StepsBlock        | `<Steps>`        | Numbered walkthrough                           |
+| MentalModelBlock  | `<MentalModel>`  | Q&A pairs for mental model building            |
+| IssueCard         | `<IssueCard>`    | Bug/Perf issue: symptom / cause / fix          |
+| KTNoteBlock       | `<KTNote>`       | KT session: coverage %, understood, unclear    |
+| CodeSnippetBlock  | `<CodeSnippet>`  | Named code panel, Shiki dual-theme highlight   |
+| Callout           | `<Callout>`      | note / tip / warning / error callout           |
+| MermaidDiagram    | `<MermaidDiagram>` | Inline Mermaid diagram                       |
 
-### CodeSnippet usage in MDX
+### CodeSnippet example
 
 ```mdx
 <CodeSnippet
   title="Model Broadcast and mapInPandas scorer"
   language="python"
   file="pipeline/scorer.py"
->
-```python
+  code={`
 model = mlflow.pyfunc.load_model(config.model_uri)
 broadcast_model = spark.sparkContext.broadcast(model)
 
@@ -249,8 +307,8 @@ def score_partition(iterator):
         yield pdf
 
 scored_df = df.mapInPandas(score_partition, schema=output_schema)
-```
-</CodeSnippet>
+  `}
+/>
 ```
 
 ---
@@ -263,8 +321,6 @@ URL pattern:  /[domain]/[topic]/[section]
 Examples:
   /mlops-systems/spark-scorer/overview
   /mlops-systems/spark-scorer/architecture
-  /mlops-systems/spark-scorer/code
-  /mlops-systems/monitoring/concepts
   /devops-platform/azure-devops/pipeline-yaml
   /architecture-decisions/adr-001/overview
   /debugging-log/spark-issues/overview
@@ -274,30 +330,57 @@ Root `/` redirects to `/mlops-systems/spark-scorer/overview`.
 
 ---
 
+## State Management (`src/store/ui.ts`)
+
+```typescript
+interface UIStore {
+  sidebarCollapsed: boolean;
+  toggleSidebar: () => void;
+
+  theme: "light" | "dark";          // persisted to localStorage
+  toggleTheme: () => void;          // also mutates document.documentElement.classList
+
+  pinnedPages: string[];            // topic IDs — persisted
+  pinPage: (id: string) => void;
+  unpinPage: (id: string) => void;
+
+  recentPages: string[];            // last 5 visited — persisted
+  addRecent: (id: string) => void;
+
+  searchQuery: string;              // NOT persisted
+  setSearchQuery: (q: string) => void;
+}
+```
+
+Persisted fields: `theme`, `pinnedPages`, `recentPages`.
+Not persisted: `sidebarCollapsed`, `searchQuery`.
+
+localStorage key: `opsnotes-ui`. Zustand `persist` format: `{ state: {...}, version: 0 }`.
+
+The no-FOUC inline script in `layout.tsx` reads this key and applies `.dark` to `<html>`
+before React hydrates. `<html>` has `suppressHydrationWarning`.
+
+---
+
 ## Navigation Tree
 
-Built at build time in `src/lib/navigation.ts` by:
-1. Reading all `content/**/` directories
-2. Parsing each `_meta.json`
-3. Grouping by domain
-4. Ordering by `_meta.json` → `order` field
+Built at request time in `src/lib/navigation.ts` (server-only — uses Node `fs`):
+1. Reads all `content/**/` directories
+2. Parses each `_meta.json`
+3. Groups by domain, orders by `order` field
 
-Nav groups (domains):
-- MLOps Systems
-- DevOps & Platform
-- Architecture Decisions
-- Debugging Log
+Nav groups (domains): MLOps Systems · DevOps & Platform · Architecture Decisions · Debugging Log
 
-Each NavItem has: `{ id, label, domain, topic, status, sections[] }`
+`src/lib/format.ts` is the client-safe split of label formatting (extracted to avoid
+importing `fs` into client components).
 
 ---
 
 ## Search
 
-- Tool: **Pagefind** (`npm run build` indexes all content automatically)
+- Tool: **Pagefind** — indexed at `npm run build`, zero JS overhead at runtime
 - Trigger: `Cmd+K` opens `SearchModal.tsx`
-- Results show: page title, section, 2-line excerpt
-- Install: `npm install pagefind`
+- Results: page title, section, 2-line excerpt
 - Build hook in `package.json`:
   ```json
   "postbuild": "pagefind --site .next --output-path public/pagefind"
@@ -305,48 +388,25 @@ Each NavItem has: `{ id, label, domain, topic, status, sections[] }`
 
 ---
 
-## State Management (Zustand — `src/store/ui.ts`)
-
-```typescript
-interface UIStore {
-  sidebarCollapsed: boolean;
-  toggleSidebar: () => void;
-
-  pinnedPages: string[];         // topic IDs
-  pinPage: (id: string) => void;
-  unpinPage: (id: string) => void;
-
-  recentPages: string[];         // last 5 visited topic IDs
-  addRecent: (id: string) => void;
-
-  searchQuery: string;
-  setSearchQuery: (q: string) => void;
-}
-```
-
-Persist `pinnedPages` and `recentPages` to `localStorage`.
-Do NOT persist `sidebarCollapsed` or `searchQuery`.
-
----
-
 ## Coding Conventions
 
 - **TypeScript strict mode** — no `any`, no implicit returns, no unused vars.
-- **Named exports** for all components. No default exports except `page.tsx` files (Next.js requirement).
-- **No inline styles** — use Tailwind utility classes only. Exception: computed/dynamic values (e.g. progress bar widths) may use CSS custom properties.
+- **Named exports** for all components. Default exports only for `page.tsx` (Next.js requirement).
+- **No inline styles** — use Tailwind utilities. Exception: computed values using `rgb(var(--token))`.
+- **No hardcoded hex values** — always use Tailwind token classes or CSS variable references.
 - **Component file naming**: PascalCase. (`Sidebar.tsx`, `InvariantBlock.tsx`)
 - **Utility file naming**: camelCase. (`content.ts`, `navigation.ts`)
-- **No barrel index.ts files** — import directly from the file.
-- **No `console.log`** in committed code. Use `console.error` only for caught errors.
+- **No barrel `index.ts` files** — import directly from the file.
+- **No `console.log`** — use `console.error` only for caught errors.
 - All MDX block components must have **exported TypeScript interfaces** for their props.
-- Server Components by default. Add `"use client"` only when hooks or browser APIs are required.
+- Server Components by default. Add `"use client"` only when hooks or browser APIs are needed.
 
 ---
 
-## Build and Dev Commands
+## Build Commands
 
 ```bash
-npm run dev          # Start dev server on localhost:3000
+npm run dev          # Dev server on localhost:3000
 npm run build        # Production build + Pagefind index
 npm run lint         # ESLint
 npm run type-check   # tsc --noEmit
@@ -356,61 +416,125 @@ npm run type-check   # tsc --noEmit
 
 ## What NOT to Do
 
-- Do NOT use `pages/` directory. App Router only (`src/app/`).
-- Do NOT use CSS Modules or styled-components. Tailwind only.
-- Do NOT add dark mode. Light theme is intentional and final.
-- Do NOT add authentication. This is a local-first personal tool.
-- Do NOT use a database. All content lives in `/content/**/*.mdx` files.
-- Do NOT import Mermaid.js at the top level — it must be dynamically imported client-side only.
-- Do NOT use `<img>` tags — use `next/image` for any images.
+- Do NOT use `pages/` directory — App Router only (`src/app/`).
+- Do NOT use CSS Modules or styled-components — Tailwind only.
+- Do NOT add authentication — local-first personal tool.
+- Do NOT use a database — all content lives in `/content/**/*.mdx`.
+- Do NOT import Mermaid.js at the top level — dynamic import client-side only.
+- Do NOT use `<img>` tags — use `next/image`.
+- Do NOT hardcode color hex values in components — use Tailwind tokens or `rgb(var(--token))`.
 - Do NOT create new block types without adding them to `MDXRenderer.tsx`'s component map.
+- Do NOT commit directly to `main` — always use a session branch.
+
+---
+
+## Git Workflow
+
+### Branch Strategy
+
+| Branch type         | Pattern                  | Purpose                              |
+|---------------------|--------------------------|--------------------------------------|
+| Main                | `main`                   | Always deployable, never commit here |
+| Session             | `session-N-description`  | One branch per Claude Code session   |
+| Hotfix              | `hotfix-description`     | Urgent fix between sessions          |
+
+### Session Start
+
+```bash
+git checkout main
+git pull origin main
+git checkout -b session-N-description
+```
+
+### Session End (always in this order)
+
+1. Update `CLAUDE.md` — mark session DONE in build status, add any new decisions/conventions.
+2. `git add .`
+3. `git commit -m "session-N: description of what was built"`
+4. `git push origin session-N-description`
+5. Open PR on GitHub → review diff → merge to main.
+
+### Commit Message Format
+
+```
+session-4: port spark-scorer content to MDX
+session-dark-theme: CSS variable dark mode with Zustand toggle
+hotfix: sidebar collapse on mobile
+content: spark-scorer MDX all 8 sections complete
+```
+
+### What Claude Code Must Do at Session End
+
+```
+End of session. Do the following in order:
+1. Update CLAUDE.md — mark this session DONE in the build status table.
+   Add any new conventions, components, or decisions made this session.
+2. git add .
+3. git commit -m "session-N: [what was built]"
+4. git push origin [current branch]
+5. Confirm push succeeded and list changed files.
+```
+
+### Rules
+
+- Never commit directly to `main`.
+- Never force push.
+- Never commit `node_modules/`, `.next/`, or `.env*` files.
+
+### `.gitignore` (confirm present)
+
+```
+node_modules/
+.next/
+.env
+.env.local
+public/pagefind/
+*.log
+.DS_Store
+```
 
 ---
 
 ## Current Build Status
 
-| Area                  | Status    | Notes                                        |
-|-----------------------|-----------|----------------------------------------------|
-| Project scaffold      | TODO      | First task in Claude Code                    |
-| Sidebar + layout      | TODO      |                                              |
-| MDX renderer          | TODO      |                                              |
-| Block components      | TODO      | Reference: eng-knowledge-platform.jsx        |
-| Spark Scorer content  | READY     | All 8 sections structured, needs MDX port    |
-| Monitoring content    | TODO      |                                              |
-| Feature Store content | TODO      |                                              |
-| Retraining content    | TODO      |                                              |
-| Search (Pagefind)     | TODO      |                                              |
-| Deployment (Vercel)   | TODO      |                                              |
+| Area                    | Status | Branch / Notes                                          |
+|-------------------------|--------|---------------------------------------------------------|
+| Project scaffold        | DONE   | session-1: Next.js 14, all deps, folder structure       |
+| Sidebar + layout shell  | DONE   | session-2: Sidebar, TopBar, TOC, SectionTabs, routing   |
+| MDX renderer + blocks   | DONE   | session-3: MDXRenderer, 11 block components, sample MDX |
+| Dark theme              | DONE   | session-dark-theme: CSS vars, Zustand toggle, no-FOUC   |
+| Spark Scorer content    | NEXT   | session-4: port all 8 sections to MDX                   |
+| Monitoring content      | TODO   |                                                         |
+| Feature Store content   | TODO   |                                                         |
+| Retraining content      | TODO   |                                                         |
+| Search (Pagefind)       | TODO   | session-5                                               |
+| Deployment (Vercel)     | TODO   | session-6                                               |
 
 ---
 
 ## Reference Prototype
 
-A working React prototype exists at `eng-knowledge-platform.jsx` (from Claude chat).
-It contains:
-- Full design system implementation (colors, typography, spacing)
-- All block type renderers (InvariantBlock, CardsBlock, FlowBlock, etc.)
-- Complete Spark Scorer content across all sections
-- Sidebar with search, nested groups, collapsible state
-- Section tab navigation
+`eng-knowledge-platform.jsx` — a working React single-file prototype from early design phase.
+Contains: full design system, all block renderers, complete Spark Scorer content, sidebar.
 
-Use this as the **visual and structural reference** when building real components.
-The color tokens, block logic, and content data should be ported directly from it.
+Use as **visual and content reference** when porting MDX sections. Do not use as code —
+it predates the current architecture.
 
 ---
 
-## Session Workflow Recommendation
+## Session Workflow
 
-Each Claude Code session should have ONE focused goal:
+Each session has ONE focused goal. Start every session with:
 
-```
-Session 1:  Scaffold Next.js project, install deps, confirm dev server runs
-Session 2:  Build layout shell (root layout, sidebar, topbar, routing skeleton)
-Session 3:  Build MDX renderer + all block components
-Session 4:  Port Spark Scorer content into MDX files
-Session 5:  Add Pagefind search + Cmd+K modal
-Session 6:  Deploy to Vercel
-```
+> "Read CLAUDE.md and confirm you understand the project before we begin.
+> Then [specific task for this session]."
 
-Start each session by saying: "Read CLAUDE.md and confirm you understand the project
-before we begin. Then [specific task for this session]."
+| Session            | Goal                                          |
+|--------------------|-----------------------------------------------|
+| session-1          | Scaffold — DONE                               |
+| session-2          | Layout shell — DONE                           |
+| session-3          | MDX renderer + block components — DONE        |
+| session-dark-theme | Dark theme — DONE                             |
+| session-4          | Port Spark Scorer content (all 8 MDX files)   |
+| session-5          | Pagefind search + Cmd+K modal                 |
+| session-6          | Deploy to Vercel                              |
